@@ -1,4 +1,4 @@
-# DeutscheContract
+# Deutsche Finance Contract
 Official Smart Contract of Deutsche Finance
 
 ## To start
