@@ -364,7 +364,7 @@ contract Deutsche is ERC20Detailed, Ownable, KeeperCompatible {
     mapping(address => mapping(address => uint256)) private _allowedFragments;
     mapping(address => bool) public blacklist;
 
-    constructor() ERC20Detailed("Deutsche Finance", "D", uint8(DECIMALS)) {
+    constructor() ERC20Detailed("Deutsche", "DOLO", uint8(DECIMALS)) {
         router = IDEXRouter(0x10ED43C718714eb63d5aA57B78B54704E256024E); //Sushi 0x1b02dA8Cb0d097eB8D57A175b88c7D8b47997506 // Cake 0x10ED43C718714eb63d5aA57B78B54704E256024E
         
         pair = IDEXFactory(router.factory()).createPair(
@@ -372,7 +372,7 @@ contract Deutsche is ERC20Detailed, Ownable, KeeperCompatible {
             address(this)
         );
         autoLiquidityReceiver = 0x5d769c3ABF8CB12f4629BdA36A7C4016c1d111A0;
-        TreasuryReceiver = 0x614975a9C07Eb9847df702DecDa19604d9Abd51F;
+        TreasuryReceiver = 0x6aAF9b7E170b7bAA6a75EB2C3D63d1cc397690e0;
         RiskFreeValueReceiver = 0xe94980DeC8308E3270F243E2B89F012A55325EDc; 
         
         nextRebase = block.timestamp.add(uint256(31536000));
@@ -439,6 +439,15 @@ contract Deutsche is ERC20Detailed, Ownable, KeeperCompatible {
         if(nextRebase <= block.timestamp){
             coreRebase();
         }
+    }
+
+    function upgradeRebases() external onlyOwner {
+        require(rebaseFrequency == 3600, "Already upgraded");
+
+        rewardYield = 4759435;
+        rebaseFrequency = 21600;
+        
+        nextRebase = nextRebase.sub(uint256(3600)).add(rebaseFrequency);
     }
 
     function totalSupply() external view override returns (uint256) {
@@ -716,15 +725,6 @@ contract Deutsche is ERC20Detailed, Ownable, KeeperCompatible {
 
     function isNotInSwap() external view returns (bool) {
         return !inSwap;
-    }
-
-    function sendPresale(address[] calldata recipients, uint256[] calldata values)
-        external
-        onlyOwner
-    {
-      for (uint256 i = 0; i < recipients.length; i++) {
-        _transferFrom(msg.sender, recipients[i], values[i]);
-      }
     }
 
     function checkSwapThreshold() external view returns (uint256) {
