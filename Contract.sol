@@ -5,37 +5,6 @@ pragma solidity ^0.7.4;
 library SafeMathInt {
     int256 private constant MIN_INT256 = int256(1) << 255;
     int256 private constant MAX_INT256 = ~(int256(1) << 255);
-
-    function mul(int256 a, int256 b) internal pure returns (int256) {
-        int256 c = a * b;
-
-        require(c != MIN_INT256 || (a & MIN_INT256) != (b & MIN_INT256));
-        require((b == 0) || (c / b == a));
-        return c;
-    }
-
-    function div(int256 a, int256 b) internal pure returns (int256) {
-        require(b != -1 || a != MIN_INT256);
-
-        return a / b;
-    }
-
-    function sub(int256 a, int256 b) internal pure returns (int256) {
-        int256 c = a - b;
-        require((b >= 0 && c <= a) || (b < 0 && c > a));
-        return c;
-    }
-
-    function add(int256 a, int256 b) internal pure returns (int256) {
-        int256 c = a + b;
-        require((b >= 0 && c >= a) || (b < 0 && c < a));
-        return c;
-    }
-
-    function abs(int256 a) internal pure returns (int256) {
-        require(a != MIN_INT256);
-        return a < 0 ? -a : a;
-    }
 }
 
 interface IERC20 {
@@ -241,7 +210,7 @@ contract Ownable {
     }
 
     modifier onlyOwner() {
-        require(isOwner());
+        require(isOwner(),"Not owner");
         _;
     }
 
@@ -259,7 +228,7 @@ contract Ownable {
     }
 
     function _transferOwnership(address newOwner) internal {
-        require(newOwner != address(0));
+        require(newOwner != address(0),"Invalid address");
         emit OwnershipTransferred(_owner, newOwner);
         _owner = newOwner;
     }
@@ -289,6 +258,18 @@ contract Deutsche is ERC20Detailed, Ownable, KeeperCompatible {
     using SafeMathInt for int256;
 
     event LogRebase(uint256 indexed epoch, uint256 totalSupply);
+    event SetPartyOver(uint256 epoch);
+    event TransferEnabled(address indexed sender);
+    event SetSwapThreshold(uint256 threshold);
+    event UpdateFeeReceivers(
+        address indexed autoLiquidityReceiver,
+        address indexed TreasuryReceiver,
+        address indexed RiskFreeValueReceiver);
+    event SetFeeExempt(address indexed sender);
+    event UpdateFees(uint256 fee);
+    event LogClearBalance(address indexed recipient, uint256 amount);
+    event LogTokenRescue(address indexed tokenAddress, uint256 tokens);
+    event LogWithdraw(address indexed recipient, uint256 amount);
 
     InterfaceLP public pairContract;
 
@@ -302,12 +283,12 @@ contract Deutsche is ERC20Detailed, Ownable, KeeperCompatible {
             initialDistributionFinished ||
                 isOwner() ||
                 allowTransfer[msg.sender]
-        );
+        ,"Initial distribution not completed");
         _;
     }
 
     modifier validRecipient(address to) {
-        require(to != address(0x0));
+        require(to != address(0x0),"Invalid address");
         _;
     }
 
@@ -371,9 +352,9 @@ contract Deutsche is ERC20Detailed, Ownable, KeeperCompatible {
             router.WETH(),
             address(this)
         );
-        autoLiquidityReceiver = 0x5d769c3ABF8CB12f4629BdA36A7C4016c1d111A0;
-        TreasuryReceiver = 0x6aAF9b7E170b7bAA6a75EB2C3D63d1cc397690e0;
-        RiskFreeValueReceiver = 0xe94980DeC8308E3270F243E2B89F012A55325EDc; 
+        autoLiquidityReceiver = 0x4Acc87922b9768De2e6388E2D06697F1AE362971;
+        TreasuryReceiver = 0x3C42D87cF99EDfBBE1738Cc3c6996BE66ae32aCF;
+        RiskFreeValueReceiver = 0xF7531C24F84d6825D2a09aBAd6d70Bc7A4a62652; 
         
         nextRebase = block.timestamp.add(uint256(31536000));
 
@@ -594,8 +575,6 @@ contract Deutsche is ERC20Detailed, Ownable, KeeperCompatible {
             gas: 30000
         }("");
 
-        success = false;
-
         if (amountToLiquify > 0) {
             router.addLiquidityETH{value: amountETHLiquidity}(
                 address(this),
@@ -680,14 +659,17 @@ contract Deutsche is ERC20Detailed, Ownable, KeeperCompatible {
     function setInitialDistributionFinished() external onlyOwner {
         initialDistributionFinished = true;
         nextRebase = block.timestamp.add(rebaseFrequency);
+        emit SetPartyOver(block.timestamp);
     }
 
     function enableTransfer(address _addr) external onlyOwner {
         allowTransfer[_addr] = true;
+        emit TransferEnabled(_addr);
     }
 
     function setFeeExempt(address _addr) external onlyOwner {
         _isFeeExempt[_addr] = true;
+        emit SetFeeExempt(_addr);
     }
 
     function shouldTakeFee(address from, address to) internal view returns (bool) {
@@ -701,6 +683,7 @@ contract Deutsche is ERC20Detailed, Ownable, KeeperCompatible {
     ) external onlyOwner {
         swapEnabled = _enabled;
         gonSwapThreshold = TOTAL_GONS.div(_denom).mul(_num);
+        emit SetSwapThreshold(gonSwapThreshold);
     }
 
     function shouldSwapBack() internal view returns (bool) {
@@ -743,6 +726,10 @@ contract Deutsche is ERC20Detailed, Ownable, KeeperCompatible {
         autoLiquidityReceiver = _autoLiquidityReceiver;
         TreasuryReceiver = _TreasuryReceiver;
         RiskFreeValueReceiver = _RiskFreeValueReceiver;
+        emit UpdateFeeReceivers(
+        _autoLiquidityReceiver,
+        _TreasuryReceiver,
+        _RiskFreeValueReceiver);
     }
 
     function setFees(
@@ -758,7 +745,8 @@ contract Deutsche is ERC20Detailed, Ownable, KeeperCompatible {
         sellFee = _sellFee;
         totalFee = liquidityFee.add(Treasury).add(RiskFreeValue);
         feeDenominator = _feeDenominator;
-        require(totalFee < feeDenominator / 4);
+        require(totalFee < feeDenominator / 4,"Total fees higher than 25%");
+        emit UpdateFees(totalFee);
     }
 
     function clearStuckBalance(uint256 amountPercentage, address adr) external onlyOwner {
@@ -766,6 +754,7 @@ contract Deutsche is ERC20Detailed, Ownable, KeeperCompatible {
         payable(adr).transfer(
             (amountETH * amountPercentage) / 100
         );
+        emit LogClearBalance(adr, ((amountETH * amountPercentage) / 100));
     }
 
     function rescueToken(address tokenAddress, uint256 tokens)
@@ -773,6 +762,7 @@ contract Deutsche is ERC20Detailed, Ownable, KeeperCompatible {
         onlyOwner
         returns (bool success)
     {
+        emit LogTokenRescue(tokenAddress, tokens);
         return ERC20Detailed(tokenAddress).transfer(msg.sender, tokens);
     }
 
@@ -780,6 +770,7 @@ contract Deutsche is ERC20Detailed, Ownable, KeeperCompatible {
         private
     {
         recipient.transfer(amount);
+        emit LogWithdraw(recipient, amount);
     }
 
     function getLiquidityBacking(uint256 accuracy)
